@@ -1,93 +1,97 @@
-AWSTemplateFormatVersion: '2010-09-09'
-Description: Infrastructure setup in AWS with VPC, public and private subnets, and a load balancer, in the ca-central-1 region.
+provider "azurerm" {
+  features {}
+}
 
-Resources:
-  MyVPC:
-    Type: AWS::EC2::VPC
-    Properties:
-      CidrBlock: 10.0.0.0/16
-      Tags:
-        - Key: Name
-          Value: shreyas-VPC
+# Create a Virtual Network
+resource "azurerm_virtual_network" "myvnet" {
+  name                = "kumar-VNet"
+  address_space       = ["10.0.0.0/16"]
+  location            = "canadacentral"
+  resource_group_name = azurerm_resource_group.myrg.name
+}
 
-  PublicSubnetOne:
-    Type: AWS::EC2::Subnet
-    Properties:
-      VpcId: !Ref MyVPC
-      CidrBlock: 10.0.1.0/24
-      AvailabilityZone: ca-central-1a
-      MapPublicIpOnLaunch: true
+# Create a resource group
+resource "azurerm_resource_group" "myrg" {
+  name     = "kumar-resources"
+  location = "canadacentral"
+}
 
-  PublicSubnetTwo:
-    Type: AWS::EC2::Subnet
-    Properties:
-      VpcId: !Ref MyVPC
-      CidrBlock: 10.0.2.0/24
-      AvailabilityZone: ca-central-1b
-      MapPublicIpOnLaunch: true
+# Create Public Subnet One
+resource "azurerm_subnet" "public_subnet_one" {
+  name                 = "PublicSubnetOne"
+  resource_group_name  = azurerm_resource_group.myrg.name
+  virtual_network_name = azurerm_virtual_network.myvnet.name
+  address_prefixes     = ["10.0.1.0/24"]
+}
 
-  PrivateSubnetOne:
-    Type: AWS::EC2::Subnet
-    Properties:
-      VpcId: !Ref MyVPC
-      CidrBlock: 10.0.3.0/24
-      AvailabilityZone: ca-central-1a
+# Create Public Subnet Two
+resource "azurerm_subnet" "public_subnet_two" {
+  name                 = "PublicSubnetTwo"
+  resource_group_name  = azurerm_resource_group.myrg.name
+  virtual_network_name = azurerm_virtual_network.myvnet.name
+  address_prefixes     = ["10.0.2.0/24"]
+}
 
-  PrivateSubnetTwo:
-    Type: AWS::EC2::Subnet
-    Properties:
-      VpcId: !Ref MyVPC
-      CidrBlock: 10.0.4.0/24
-      AvailabilityZone: ca-central-1b
+# Create Private Subnet One
+resource "azurerm_subnet" "private_subnet_one" {
+  name                 = "PrivateSubnetOne"
+  resource_group_name  = azurerm_resource_group.myrg.name
+  virtual_network_name = azurerm_virtual_network.myvnet.name
+  address_prefixes     = ["10.0.3.0/24"]
+}
 
-  InternetGateway:
-    Type: AWS::EC2::InternetGateway
-    Properties:
-      Tags:
-        - Key: Name
-          Value: shreyas-IGW
+# Create Private Subnet Two
+resource "azurerm_subnet" "private_subnet_two" {
+  name                 = "PrivateSubnetTwo"
+  resource_group_name  = azurerm_resource_group.myrg.name
+  virtual_network_name = azurerm_virtual_network.myvnet.name
+  address_prefixes     = ["10.0.4.0/24"]
+}
 
-  AttachGateway:
-    Type: AWS::EC2::VPCGatewayAttachment
-    Properties:
-      VpcId: !Ref MyVPC
-      InternetGatewayId: !Ref InternetGateway
+# Create a Public IP for the Load Balancer
+resource "azurerm_public_ip" "lb_public_ip" {
+  name                = "lb-public-ip"
+  location            = azurerm_resource_group.myrg.location
+  resource_group_name = azurerm_resource_group.myrg.name
+  allocation_method   = "Static"
+}
 
-  LoadBalancer:
-    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
-    Properties:
-      Name: shreyas-ELB
-      Subnets:
-        - !Ref PublicSubnetOne
-        - !Ref PublicSubnetTwo
-      Type: application
+# Create a Load Balancer
+resource "azurerm_lb" "mylb" {
+  name                = "kumar-ELB"
+  location            = azurerm_resource_group.myrg.location
+  resource_group_name = azurerm_resource_group.myrg.name
+  sku                 = "Standard"
 
-  LoadBalancerListener:
-    Type: AWS::ElasticLoadBalancingV2::Listener
-    Properties:
-      DefaultActions:
-        - Type: fixed-response
-          FixedResponseConfig:
-            StatusCode: 200
-            ContentType: text/plain
-            MessageBody: "Welcome to shreyas Final Test API Server"
-      LoadBalancerArn: !Ref LoadBalancer
-      Port: 80
-      Protocol: HTTP
+  frontend_ip_configuration {
+    name                 = "public-ipconfig"
+    public_ip_address_id = azurerm_public_ip.lb_public_ip.id
+  }
+}
 
-Outputs:
-  VPCID:
-    Description: "VPC ID"
-    Value: !Ref MyVPC
+# Load Balancer Rule
+resource "azurerm_lb_rule" "lbrule" {
+  resource_group_name            = azurerm_resource_group.myrg.name
+  loadbalancer_id                = azurerm_lb.mylb.id
+  name                           = "http-rule"
+  protocol                       = "Tcp"
+  frontend_port                  = 80
+  backend_port                   = 80
+  frontend_ip_configuration_name = "public-ipconfig"
+  backend_address_pool_id        = azurerm_lb_backend_address_pool.bap.id
+}
 
-  LoadBalancerDNS:
-    Description: "DNS Name for the Load Balancer"
-    Value: !GetAtt LoadBalancer.DNSName
+# Backend Address Pool
+resource "azurerm_lb_backend_address_pool" "bap" {
+  loadbalancer_id     = azurerm_lb.mylb.id
+  name                = "backend-address-pool"
+}
 
-  PrivateSubnetOneID:
-    Description: "ID of the first private subnet"
-    Value: !Ref PrivateSubnetOne
+# Outputs
+output "vnet_id" {
+  value = azurerm_virtual_network.myvnet.id
+}
 
-  PrivateSubnetTwoID:
-    Description: "ID of the second private subnet"
-    Value: !Ref PrivateSubnetTwo
+output "load_balancer_address" {
+  value = azurerm_public_ip.lb_public_ip.ip_address
+}
